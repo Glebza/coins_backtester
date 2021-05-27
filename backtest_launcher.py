@@ -1,5 +1,5 @@
-from glebza.tradeapp.src.backtest import do_backtest
-from glebza.tradeapp.src.repository.backtest_repository import BacktestRepository
+from glebza.tradeapp.src.backtests.backtest import do_backtest
+from glebza.tradeapp.src.backtests.repository.backtest_repository import BacktestRepository
 from datetime import datetime,  timedelta
 
 
@@ -28,13 +28,13 @@ ticker = 'BTCUSDT'
 start_cash = 100000
 period = br.get_backtest_period()
 # full periods for backtests
-# start_date = period[0][0]
-# end_date = period[1][0]
-# intervals = br.get_backtest_interavals()
+start_date = period[0][0]
+end_date = period[1][0]
+intervals = br.get_backtest_interavals()
 #custom periods
-start_date = datetime(2018, 1, 29, 3, 0, 0)
-end_date = datetime(2018, 2, 5, 3, 0, 0)
-intervals = [(2,'other')]
+# start_date = datetime(2018, 1, 29, 3, 0, 0)
+# end_date = datetime(2018, 2, 5, 3, 0, 0)
+# intervals = [(2,'other')]
 launch_time = datetime.now()
 for interval in intervals:
     interval_id = interval[0]

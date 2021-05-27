@@ -1,124 +1,116 @@
+from datetime import datetime, timedelta
+
 import websocket, json, pprint, numpy, talib, psycopg2
 import config
 from binance import Client, ThreadedWebsocketManager, ThreadedDepthCacheManager
 from binance import ThreadedWebsocketManager
 from binance.enums import *
+from glebza.tradeapp.src.tradebot.repository.binance_bot_repository import BinanceBotRepository as repository
 from binance.exceptions import BinanceAPIException
 
 
-def enrich_close_prices(ticker):
+def warm_up(ticker):
     print(ticker)
-    conn = psycopg2.connect(
-        host=config.dbhost,
-        database=config.dbname,
-        port=config.dbport,
-        user=config.dbuser,
-        password=config.dbpassword)
-    cur = conn.cursor()
-    cur.execute('select id from coins where ticker=%s', (ticker,))
-    ticker_id = cur.fetchone()
-    cur.execute('select close_price from minute_klines where ticker_id = %s', (ticker_id,))
-    prices = cur.fetchall()
-    result = []
-    for price in prices:
-        result.append(price[0])
-    return result
-
-
-def get_historical_data():
-    global close
-    dbklines = []
-    klines = client.get_historical_klines(symbol, Client.KLINE_INTERVAL_1MINUTE, "1 May, 2021", "20 May, 2021")
+    client = Client(config.api_key, config.api_secret)
+    volumes = []
+    closes = []
+    end_date = datetime.now()
+    start_date = (end_date - timedelta(days=1)).strftime("%d/%m/%Y, %H:%M:%S")
+    klines = client.get_historical_klines(symbol, Client.KLINE_INTERVAL_15MINUTE, start_date,
+                                          end_date.strftime("%d/%m/%Y, %H:%M:%S"))
     start_interval = 0
     open_p = 1
     high = 2
     low = 3
     close = 4
-    value = 5
+    volume = 5
     for kline in klines:
-        dbklines.append((kline[start_interval], kline[open_p], kline[high], kline[low], kline[close], kline[value]))
-    print(dbklines)
-    conn = psycopg2.connect(
-        host=config.dbhost,
-        database=config.dbname,
-        port=config.dbport,
-        user=config.dbuser,
-        password=config.dbpassword)
-    cur = conn.cursor()
-    cur.executemany('''
-insert into minute_klines (ticker_id, k_interval, open_price, high_price, low_price, close_price, k_value)
-values (1,%s, %s, %s, %s, %s, %s);
-''', dbklines)
-    conn.commit()
+        volumes.append(float(kline[volume]))
+        closes.append(float(kline[close]))
+    return (closes, volumes)
 
 
 symbol = 'BTCUSDT'
-close_prices = enrich_close_prices(symbol)
+warm_data = warm_up(symbol)
+volumes = warm_data[1]
+close_prices = warm_data[0]
 print(close_prices)
 RSI_PERIOD = 14
-RSI_OVERSOLD = 30
+RSI_OVERSOLD = 40
 RSI_OVERBOUGHT = 70
 in_position = False
+order = None
+start_cash = 200
 
 
 def place_order(client, symbol, side, price, quantity):
+    order = None
     try:
-        order = client.create_test_order(
+        order = client.create_order(
             symbol=symbol,
             side=side,
-            type=Client.ORDER_TYPE_MARKET,
+            type=Client.ORDER_TYPE_LIMIT,
+            timeInForce=TIME_IN_FORCE_GTC,
             quantity=quantity,
-            )
+            price=price
+        )
         print(order)
-        return True
     except Exception as e:
         print(e)
-        return False
+    return order
 
 
 # start is required to initialise its internal loop
 def handle_socket_message(msg):
     global in_position
+    global order
+    print(msg)
     candle = msg['k']
     is_candle_closed = candle['x']
     closed_price = candle['c']
+    volume = candle['v']
+
+    if order is not None:
+        order = client.get_order(symbol=symbol, orderId=order.orderId)
+        if order.status == ORDER_STATUS_FILLED:
+            repository.update_order_status(order.orderId, ORDER_STATUS_FILLED)
+            if order.side == SIDE_BUY:
+                in_position = True
+            else:
+                order = None
 
     if is_candle_closed:
         close_prices.append(float(closed_price))
-        # print(candle)
-
-        if len(close_prices) > RSI_PERIOD:
-            np_closes = numpy.array(close_prices)
-            rsi = talib.RSI(np_closes, RSI_PERIOD)
-            # print('all rsis calculated so far  {}'.format(rsi))
-            last_rsi = rsi[-1]
-            print('last rsi {}'.format(last_rsi))
-            if last_rsi > RSI_OVERBOUGHT:
-                if not in_position:
-                    print('it is overbought, but we dont own it. nothing to do ')
-                else:
-                    print('sell!')
-                    is_succeeded = place_order(client, symbol, Client.SIDE_SELL,closed_price, float(0.001))
-                    if is_succeeded:
-                        in_position = False
-
-            if last_rsi < RSI_OVERSOLD:
-                if in_position:
-                    print('it is oversold, but we already own it. nothing to do ')
-                else:
-                    print('buy!')
-                    is_succeeded = place_order(client, symbol, Client.SIDE_BUY,closed_price, float(0.001))
-                    if is_succeeded:
-                        in_position = True
+        volumes.append(float(volume))
+        print(close_prices)
+        np_closes = numpy.array(close_prices)
+        np_volumes = numpy.array(volumes)
+        rsi = talib.RSI(np_closes, RSI_PERIOD)
+        obv = talib.OBV(np_closes, np_volumes)
+        sma = talib.MA(np_closes, RSI_PERIOD)
+        last_rsi = rsi[-1]
+        print('last rsi {}'.format(last_rsi))
+        if in_position:
+            diff = (closed_price - order.price) / order.price
+            if diff < float(-0.05) or rsi[0] > RSI_OVERBOUGHT and closed_price < sma[0]:
+                print('sell!')
+                order = place_order(client, symbol, Client.SIDE_SELL, closed_price * 0.99, order.executedQty)
+                repository.save_order(order)
+                in_position = False
+        else:
+            if last_rsi < RSI_OVERSOLD < rsi[0] and closed_price >= sma[0] \
+                    and obv[-1] < obv[0] and close_prices[-1] < closed_price:
+                qty = start_cash / closed_price
+                print('buy! qty = {}'.format(qty))
+                order = place_order(client, symbol, Client.SIDE_BUY, closed_price, float(qty))
+                repository.save_order(order)
 
 
 client = Client(config.api_key, config.api_secret)
-# get_historical_data()
 print('start listening {}'.format(symbol))
 
-place_order(client, symbol, Client.SIDE_BUY,38336.2, 0.001)
-fees = client.get_trade_fee(symbol='BTCUSDT')
-print(fees)
+# order = place_order(client, symbol, Client.SIDE_BUY,float(38900), 0.001684)
+# {'symbol': 'BTCUSDT', 'orderId': 6183087675, 'orderListId': -1, 'clientOrderId': 'hzf8ut8BgIrCUh7Ey4kdgC', 'transactTime': 1622133593112, 'price': '38900.00000000', 'origQty': '0.00168400', 'executedQty': '0.00168400', 'cummulativeQuoteQty': '65.42289480', 'status': 'FILLED', 'timeInForce': 'GTC', 'type': 'LIMIT', 'side': 'BUY', 'fills': [{'price': '38849.70000000', 'qty': '0.00168400', 'commission': '0.00000168', 'commissionAsset': 'BTC', 'tradeId': 875740731}]}
 #twm = ThreadedWebsocketManager(api_key=config.api_key, api_secret=config.api_secret)
-#twm.start()
-#twm.start_kline_socket(callback=handle_socket_message, symbol=symbol, interval=KLINE_INTERVAL_1MINUTE)
+# twm.start()
+# twm.start_kline_socket(callback=handle_socket_message, symbol=symbol, interval=KLINE_INTERVAL_1MINUTE)

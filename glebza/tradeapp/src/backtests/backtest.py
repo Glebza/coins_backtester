@@ -1,7 +1,7 @@
 import csv, backtrader as bt
 import config
 import psycopg2
-from glebza.tradeapp.src.strategies.RSIStrategy import RSIStrategy
+from glebza.tradeapp.src.backtests.strategies.RSIStrategy import RSIStrategy
 
 
 def create_data_file(ticker, time_from, time_to):
@@ -12,7 +12,7 @@ def create_data_file(ticker, time_from, time_to):
         user=config.dbuser,
         password=config.dbpassword)
     cur = conn.cursor()
-    filename = '/Users/ruasyg4/PycharmProjects/TradeApp/backtest_data.csv'
+    filename = '/backtest_data.csv'
     f = open(filename, 'w')
     writer = csv.writer(f)
     start_interval = 0

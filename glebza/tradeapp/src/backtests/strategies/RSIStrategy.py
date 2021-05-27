@@ -1,9 +1,6 @@
-import csv, talib, websocket, backtrader as bt
-import config
-from glebza.tradeapp.src.strategies.OnBalanceVolume import OnBalanceVolume
+import backtrader as bt
+from glebza.tradeapp.src.backtests.strategies.OnBalanceVolume import OnBalanceVolume
 from backtrader import Order
-from binance import Client
-import psycopg2
 
 
 class RSIStrategy(bt.Strategy):
