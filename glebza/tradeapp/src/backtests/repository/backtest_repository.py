@@ -15,14 +15,21 @@ class BacktestRepository:
             password=config.dbpassword)
         return connection
 
-    def enrich_history_data(self):
+    def enrich_history_data(self, interval) -> object:
+        table_name = "kline_{s}".format(s=interval)
+        sql_insert = '''
+insert into {table_name} (ticker_id, k_interval, open_price, high_price, low_price, close_price, volume)
+values (1,%s, %s, %s, %s, %s, %s);
+'''.format(table_name=table_name)
+        print(sql_insert)
         client = Client(config.api_key, config.api_secret)
         symbol = 'BTCUSDT'
         conn = self.__get_connection()
         cur = conn.cursor()
         dbrows = []
-        klines = client.get_historical_klines(symbol, Client.KLINE_INTERVAL_15MINUTE, "01.01.2021 03:00:00",
-                                              "24.05.2021 23:59:59")
+        #date in mm-dd-yyyy format
+        klines = client.get_historical_klines(symbol, interval, "11.01.2022 00:00:00",
+                                              "11.30.2022 23:59:59")
 
         start_interval = 0
         open_p = 1
@@ -36,18 +43,24 @@ class BacktestRepository:
             print(interval.strftime('%Y-%d-%m %H:%M:%S'))
             dbrows.append((interval, kline[open_p], kline[high], kline[low], kline[close], kline[volume]))
 
-        cur.executemany('''
-insert into minutes_kline_15 (ticker_id, k_interval, open_price, high_price, low_price, close_price, volume)
-values (1,%s, %s, %s, %s, %s, %s);
-''', dbrows)
+        cur.executemany(sql_insert,  dbrows)
         conn.commit()
         conn.close()
 
-    def save_strategy_results(self, results):
+    def get_kline_period_id(self, period_descr):
         conn = self.__get_connection()
         cur = conn.cursor()
-        cur.executemany('''insert into backtests(launch_time,period_from,period_to,backtest_interval_id,start_sum,result_sum,kline_period,status, error_descr)
-        values(%s,%s,%s,%s,%s,%s,%s,%s,%s)''', results)
+        cur.execute('select id from backtest_periods where period_descr=%s ', period_descr)
+        period_id = cur.fetchone()
+        conn.close()
+        return period_id
+
+    def save_strategy_results(self, results):
+
+        conn = self.__get_connection()
+        cur = conn.cursor()
+        cur.executemany('''insert into backtests(launch_time,period_from,period_to,backtest_interval_id,start_sum,result_sum,kline_period,status, error_descr,launch_id)
+        values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)''', results)
         conn.commit()
         conn.close()
 
@@ -59,18 +72,26 @@ values (1,%s, %s, %s, %s, %s, %s);
         conn.close()
         return periods
 
-    def get_backtest_period(self):
+    def get_backtest_period(self, interval):
+        table_name = "kline_{s}".format(s=interval)
         conn = self.__get_connection()
         cur = conn.cursor()
-        cur.execute('''(select k_interval from minutes_kline_15 order by k_interval limit 1)
+        sql_insert = '''(select k_interval from {table_name} order by k_interval limit 1)
         union all
-        (select k_interval from minutes_kline_15 order by k_interval desc limit 1)
-        ''')
+        (select k_interval from {table_name} order by k_interval desc limit 1)
+        '''.format(table_name=table_name)
+        cur.execute(sql_insert)
         intervals = cur.fetchall()
         print('intervals for backtesting from {} to {}'.format(intervals[0], intervals[1]))
         conn.close()
         return intervals
 
 
+    def get_next_launch_id(self):
+        conn = self.__get_connection()
+        cur = conn.cursor()
+        cur.execute('select nextval(\'public.backtests_launch_id_seq\')')
+        return cur.fetchone()
+
 #bt = BacktestRepository()
-#bt.enrich_history_data()
+#bt.enrich_history_data(Client.KLINE_INTERVAL_1MINUTE)
