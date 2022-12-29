@@ -5,7 +5,7 @@ from backtrader import Order
 
 class MACDStrategy(bt.Strategy):
     params = (('period', 14),
-              ('maperiod', 15),
+              ('maperiod', 12),
               ('macd1', 12),
               ('macd2', 26),
               ('macdsig', 9),
@@ -24,15 +24,18 @@ class MACDStrategy(bt.Strategy):
                                        period_me2=self.p.macd2,
                                        period_signal=self.p.macdsig)
 
+        bt.indicators.MACDHisto(self.macd.macd)
+
         # Cross of macd.macd and macd.signal
-        self.mcross = bt.indicators.CrossOver(self.macd.macd, self.macd.signal)
+        self.mcross = bt.indicators.CrossOver(self.macd.macd, self.macd.signal,plot=False)
 
         # To set the stop price
         self.atr = bt.indicators.ATR(self.data, period=self.p.atrperiod)
 
-        self.rsi = bt.indicators.RSI(self.data, period=self.params.period)
+        self.rsi = bt.indicators.RSI(self.data, period=self.params.period,plot=False)
         self.obv = OnBalanceVolume(self.data)
-        self.sma = bt.indicators.SimpleMovingAverage(self.data, period=self.params.maperiod, plotname='sma')
+        self.sma = bt.indicators.ExponentialMovingAverage(self.data, period=self.p.macd1, plotname='ema')
+        self.sma = bt.indicators.ExponentialMovingAverage(self.data, period=self.p.macd2, plotname='ema26')
         # Control market trend
         self.smadir = self.sma - self.sma(-self.p.dirperiod)
 
@@ -41,7 +44,7 @@ class MACDStrategy(bt.Strategy):
 
     def next(self):
         if not self.position:
-            if (not self.order) and self.rsi[0] < 45 and self.mcross[0] > 0.0 :
+            if (not self.order) and self.rsi[0] < 45 and self.mcross[0] > 0.0 and self.macd < 0:
                 self.order = self.buy(size=1)
                 pdist = self.atr[0] * self.p.atrdist
                 self.pstop = self.data.close[0] - pdist
@@ -54,14 +57,13 @@ class MACDStrategy(bt.Strategy):
                 pstop = self.pstop
 
                 if pos_len > 0:
-                    diff = (self.data.close - pos.price) / pos.price
+                    diff = self.data.close - pos.price
                    # print(' {} : (close {} -  prev{} )/ prev {}  = {}'
                     #      .format(self.data.datetime.datetime(), self.data.close[0], pos.price, pos.price, diff))
 
-                if pos_len > 0 and self.mcross[0] < 0.0\
-                        and self.macd.macd / self.macd.signal < 0.8:
+                if pos_len > 0 and diff >= 5:
                     print('close at {} with close {}'.format(self.data.datetime.datetime(), self.data.close[0]))
-                    self.order = self.sell(size=-1, price=self.data.close[0]*0.99, exectype=Order.Limit,)
+                    self.order = self.sell(size=-1, price=self.data.close[0], exectype=Order.Limit,)
 
                 else:
                     pdist = self.atr[0] * self.p.atrdist

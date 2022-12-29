@@ -35,8 +35,8 @@ end_date = period[1][0]
 #intervals = br.get_backtest_interavals()
 launch_id = br.get_next_launch_id()
 # custom periods
-start_date = datetime(2022, 11, 1, 0, 0, 0)
-end_date = datetime(2022, 11, 30, 0, 0, 0)
+start_date = datetime(2022, 9, 1, 0, 0, 0)
+end_date = datetime(2022, 11, 1, 0, 0, 0)
 intervals = [(3,'other')]
 launch_time = datetime.now()
 for interval in intervals:
@@ -68,6 +68,6 @@ for interval in intervals:
                                   launch_id, KLINE_INTERVAL_1MINUTE)
         br.save_strategy_results(results)
     if interval[1] == 'other':
-        results = launch_backtest(launch_time, 30, interval_id, date_from, date_to, end_date, start_cash, True,
+        results = launch_backtest(launch_time, 30, interval_id, date_from, date_to, end_date, start_cash, False,
                                   launch_id, KLINE_INTERVAL_1MINUTE)
         br.save_strategy_results(results)
